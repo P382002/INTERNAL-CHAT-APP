@@ -1,65 +1,93 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, {
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
 import { io } from "socket.io-client";
 
-const socket = io("http://localhost:5000", {
-  transports: ["websocket"],
-});
+const socket = io(
+  "http://localhost:5000",
+  {
+    transports: ["websocket"],
+  }
+);
 
-const Chat = ({ groupId, userId }) => {
-  const [messages, setMessages] = useState([]);
-  const [text, setText] = useState("");
+const Chat = ({
+  groupId,
+  userId,
+}) => {
+  const [messages, setMessages] =
+    useState([]);
 
-  const messagesEndRef = useRef(null);
+  const [text, setText] =
+    useState("");
 
-  // -----------------------------
-  // AUTO SCROLL
-  // -----------------------------
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({
-      behavior: "smooth",
-    });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+  const fileInputRef =
+    useRef(null);
 
   // -----------------------------
-  // LOAD MESSAGES
+  // LOAD + SOCKET JOIN
   // -----------------------------
   useEffect(() => {
     if (!groupId) return;
 
     setMessages([]);
 
-    const loadMessages = async () => {
-      try {
-        const res = await fetch(
-          `http://localhost:5000/api/messages/${groupId}`
-        );
+    // LOAD OLD MESSAGES
+    const loadMessages =
+      async () => {
+        try {
+          const res =
+            await fetch(
+              `http://localhost:5000/api/messages/${groupId}`
+            );
 
-        const data = await res.json();
+          if (!res.ok) return;
 
-        setMessages(data);
-      } catch (err) {
-        console.log(err);
-      }
-    };
+          const data =
+            await res.json();
+
+          setMessages(data);
+        } catch (err) {
+          console.error(
+            "Fetch messages error:",
+            err
+          );
+        }
+      };
 
     loadMessages();
 
-    socket.emit("join_group", groupId);
+    // JOIN ROOM
+    socket.emit(
+      "join_group",
+      groupId
+    );
 
-    socket.off("receive_message");
+    socket.off(
+      "receive_message"
+    );
 
-    socket.on("receive_message", (msg) => {
-      if (msg.groupId === groupId) {
-        setMessages((prev) => [...prev, msg]);
+    socket.on(
+      "receive_message",
+      (msg) => {
+        if (
+          msg.groupId ===
+          groupId
+        ) {
+          setMessages((prev) => [
+            ...prev,
+            msg,
+          ]);
+        }
       }
-    });
+    );
 
     return () => {
-      socket.off("receive_message");
+      socket.off(
+        "receive_message"
+      );
     };
   }, [groupId]);
 
@@ -67,36 +95,49 @@ const Chat = ({ groupId, userId }) => {
   // SEND MESSAGE
   // -----------------------------
   const sendMessage = () => {
-    if (!text.trim()) return;
+    if (
+      !text.trim() ||
+      !groupId
+    )
+      return;
 
-    socket.emit("send_message", {
-      groupId,
-      userId,
-      text,
-    });
+    socket.emit(
+      "send_message",
+      {
+        groupId,
+        userId,
+        text,
+      }
+    );
 
     setText("");
   };
 
   // -----------------------------
-  // EMPTY STATE
+  // FILE PICKER
   // -----------------------------
-  if (!groupId) {
-    return (
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          fontSize: "20px",
-          color: "#777",
-        }}
-      >
-        Select a group to start chatting
-      </div>
-    );
-  }
+  const openFilePicker =
+    () => {
+      fileInputRef.current.click();
+    };
+
+  // -----------------------------
+  // FILE SELECT
+  // -----------------------------
+  const handleFileSelect =
+    (e) => {
+      const file =
+        e.target.files[0];
+
+      if (!file) return;
+
+      alert(
+        `Selected File: ${file.name}`
+      );
+
+      // FUTURE:
+      // upload file to backend
+    };
 
   // -----------------------------
   // UI
@@ -105,9 +146,9 @@ const Chat = ({ groupId, userId }) => {
     <div
       style={{
         display: "flex",
-        flexDirection: "column",
+        flexDirection:
+          "column",
         height: "100%",
-        background: "#f5f7fb",
       }}
     >
       {/* MESSAGES */}
@@ -116,114 +157,193 @@ const Chat = ({ groupId, userId }) => {
           flex: 1,
           overflowY: "auto",
           padding: "20px",
+          display: "flex",
+          flexDirection:
+            "column",
+          gap: "14px",
         }}
       >
-        {messages.map((m, index) => {
-          const isMine = String(m.userId) === String(userId);
+        {messages.map((m) => {
+          const isMine =
+            m.userId ===
+            userId;
 
           return (
             <div
-              key={m._id || index}
+              key={
+                m._id ||
+                Math.random()
+              }
               style={{
                 display: "flex",
-                justifyContent: isMine
-                  ? "flex-end"
-                  : "flex-start",
-                marginBottom: "12px",
+                justifyContent:
+                  isMine
+                    ? "flex-end"
+                    : "flex-start",
               }}
             >
               <div
                 style={{
                   maxWidth: "60%",
-                  padding: "10px 14px",
-                  borderRadius: "14px",
-                  background: isMine
-                    ? "#4f46e5"
-                    : "#ffffff",
+                  padding:
+                    "12px 16px",
+                  borderRadius:
+                    "18px",
+
+                  background:
+                    isMine
+                      ? "#4f46e5"
+                      : "white",
+
                   color: isMine
                     ? "white"
-                    : "black",
+                    : "#111827",
+
                   boxShadow:
-                    "0 1px 4px rgba(0,0,0,0.1)",
+                    "0 2px 8px rgba(0,0,0,0.08)",
                 }}
               >
                 {!isMine && (
                   <div
                     style={{
-                      fontSize: "12px",
-                      fontWeight: "bold",
-                      marginBottom: "4px",
-                      color: "#555",
+                      fontSize:
+                        "12px",
+                      fontWeight:
+                        "600",
+                      marginBottom:
+                        "5px",
+                      color:
+                        "#6366f1",
                     }}
                   >
                     {m.userName}
                   </div>
                 )}
 
-                <div>{m.text}</div>
+                <div>
+                  {m.text}
+                </div>
 
                 <div
                   style={{
-                    fontSize: "10px",
-                    marginTop: "5px",
-                    textAlign: "right",
+                    fontSize:
+                      "11px",
+                    marginTop:
+                      "6px",
                     opacity: 0.7,
+                    textAlign:
+                      "right",
                   }}
                 >
                   {new Date(
                     m.createdAt
-                  ).toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
+                  ).toLocaleTimeString(
+                    [],
+                    {
+                      hour:
+                        "2-digit",
+                      minute:
+                        "2-digit",
+                    }
+                  )}
                 </div>
               </div>
             </div>
           );
         })}
-
-        <div ref={messagesEndRef} />
       </div>
 
-      {/* INPUT */}
+      {/* INPUT AREA */}
       <div
         style={{
-          display: "flex",
           padding: "15px",
-          borderTop: "1px solid #ddd",
-          background: "white",
+          borderTop:
+            "1px solid #ddd",
+          background:
+            "white",
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
         }}
       >
+        {/* FILE BUTTON */}
+        <button
+          onClick={
+            openFilePicker
+          }
+          style={{
+            width: "45px",
+            height: "45px",
+            borderRadius: "12px",
+            border: "none",
+            background:
+              "#eef2ff",
+            cursor: "pointer",
+            fontSize: "18px",
+          }}
+          title="Attach File"
+        >
+          📎
+        </button>
+
+        {/* HIDDEN FILE INPUT */}
+        <input
+          type="file"
+          ref={fileInputRef}
+          style={{
+            display: "none",
+          }}
+          onChange={
+            handleFileSelect
+          }
+        />
+
+        {/* MESSAGE INPUT */}
         <input
           value={text}
           onChange={(e) =>
-            setText(e.target.value)
+            setText(
+              e.target.value
+            )
           }
           placeholder="Type a message..."
           style={{
             flex: 1,
-            padding: "12px",
-            borderRadius: "10px",
-            border: "1px solid #ccc",
+            padding:
+              "14px 18px",
+            borderRadius:
+              "14px",
+            border:
+              "1px solid #d1d5db",
             outline: "none",
+            fontSize: "15px",
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") {
+            if (
+              e.key ===
+              "Enter"
+            ) {
               sendMessage();
             }
           }}
         />
 
+        {/* SEND */}
         <button
-          onClick={sendMessage}
+          onClick={
+            sendMessage
+          }
           style={{
-            marginLeft: "10px",
-            padding: "12px 20px",
-            background: "#4f46e5",
+            background:
+              "#4f46e5",
             color: "white",
             border: "none",
-            borderRadius: "10px",
+            padding:
+              "12px 22px",
+            borderRadius:
+              "12px",
             cursor: "pointer",
+            fontWeight: "600",
           }}
         >
           Send

@@ -4,15 +4,9 @@ import React, {
   useState,
 } from "react";
 
-import { io } from "socket.io-client";
-
-const socket = io(
-  "http://localhost:5000"
-);
-
-function Chat({
-  groupId,
-  userId,
+function DirectChat({
+  currentUser,
+  selectedUser,
 }) {
   const [message, setMessage] =
     useState("");
@@ -23,19 +17,10 @@ function Chat({
   const messagesEndRef =
     useRef(null);
 
-  const currentUser =
-    JSON.parse(
-      localStorage.getItem(
-        "user"
-      )
-    );
-
   // ======================
   // FORMAT TIME
   // ======================
   const formatTime = (date) => {
-    if (!date) return "";
-
     return new Date(
       date
     ).toLocaleTimeString([], {
@@ -47,126 +32,45 @@ function Chat({
   // ======================
   // AUTO SCROLL
   // ======================
-  const scrollToBottom = () => {
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView(
       {
         behavior:
           "smooth",
       }
     );
-  };
-
-  useEffect(() => {
-    scrollToBottom();
   }, [messages]);
-
-  // ======================
-  // LOAD MESSAGES
-  // ======================
-  useEffect(() => {
-    if (!groupId) return;
-
-    const loadMessages =
-      async () => {
-        try {
-          const res =
-            await fetch(
-              `http://localhost:5000/api/messages/${groupId}`
-            );
-
-          const data =
-            await res.json();
-
-          setMessages(
-            Array.isArray(
-              data
-            )
-              ? data
-              : []
-          );
-        } catch (err) {
-          console.log(err);
-        }
-      };
-
-    loadMessages();
-  }, [groupId]);
-
-  // ======================
-  // SOCKET
-  // ======================
-  useEffect(() => {
-    if (!groupId) return;
-
-    socket.emit(
-      "join_group",
-      groupId
-    );
-
-    socket.on(
-      "receive_message",
-      (data) => {
-        if (
-          data.groupId ===
-          groupId
-        ) {
-          setMessages(
-            (prev) => [
-              ...prev,
-              data,
-            ]
-          );
-        }
-      }
-    );
-
-    return () => {
-      socket.off(
-        "receive_message"
-      );
-    };
-  }, [groupId]);
 
   // ======================
   // SEND MESSAGE
   // ======================
-  const sendMessage = async () => {
+  const sendMessage = () => {
     if (
-      !message.trim() ||
-      !groupId
+      !message.trim()
     )
       return;
 
-    socket.emit(
-      "send_message",
-      {
-        groupId,
-        userId,
-        text: message,
-      }
+    const newMessage = {
+      id: Date.now(),
+
+      text: message,
+
+      sender:
+        currentUser._id,
+
+      createdAt:
+        new Date(),
+    };
+
+    setMessages(
+      (prev) => [
+        ...prev,
+        newMessage,
+      ]
     );
 
     setMessage("");
   };
-
-  if (!groupId) {
-    return (
-      <div
-        style={{
-          height: "100%",
-          display: "flex",
-          justifyContent:
-            "center",
-          alignItems:
-            "center",
-          color: "#888",
-          fontSize: "20px",
-        }}
-      >
-        Select a group
-      </div>
-    );
-  }
 
   return (
     <div
@@ -191,12 +95,12 @@ function Chat({
       >
         {messages.map((msg) => {
           const isMine =
-            msg.userId ===
-            userId;
+            msg.sender ===
+            currentUser._id;
 
           return (
             <div
-              key={msg._id}
+              key={msg.id}
               style={{
                 display: "flex",
                 justifyContent:
@@ -221,7 +125,6 @@ function Chat({
                       : "flex-start",
                 }}
               >
-                {/* NAME */}
                 {!isMine && (
                   <div
                     style={{
@@ -235,9 +138,8 @@ function Chat({
                         "6px",
                     }}
                   >
-                    {
-                      msg.userName
-                    }
+                    {selectedUser.name ||
+                      `${selectedUser.firstName} ${selectedUser.lastName}`}
                   </div>
                 )}
 
@@ -321,7 +223,10 @@ function Chat({
       >
         <input
           type="text"
-          placeholder="Type a message..."
+          placeholder={`Message ${
+            selectedUser.name ||
+            selectedUser.firstName
+          }`}
           value={message}
           onChange={(e) =>
             setMessage(
@@ -389,4 +294,4 @@ function Chat({
   );
 }
 
-export default Chat;
+export default DirectChat;

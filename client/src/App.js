@@ -1,106 +1,240 @@
-import React, {
-  useEffect,
-  useState,
-} from "react";
+import React, { useEffect, useState } from "react";
+import { io } from "socket.io-client";
 
 import Login from "./components/Login";
-import Groups from "./components/Groups";
 import Chat from "./components/Chat";
 import Admin from "./components/Admin";
+import DirectChat from "./components/DirectChat";
+import CalendarPage from "./components/CalendarPage";
+import LeaveRequest from "./components/LeaveRequest";
+import HRPanel from "./components/HRPanel";
+
+const socket = io("http://localhost:5000", {
+  transports: ["websocket"],
+});
 
 function App() {
-  const [groups, setGroups] =
-    useState([]);
+  const [groups, setGroups] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [onlineUsers, setOnlineUsers] = useState([]);
+  const [unreadCounts, setUnreadCounts] = useState({});
+  const [activeTab, setActiveTab] = useState("all");
+  const [sidebarTab, setSidebarTab] = useState("chat");
+  const [search, setSearch] = useState("");
+  const [selectedGroup, setSelectedGroup] = useState(null);
+  const [selectedUser, setSelectedUser] = useState(null);
 
-  const [selectedGroup, setSelectedGroup] =
-    useState(null);
+  // =========================
+  // NOTIFICATION STATE
+  // =========================
+  const [notifications, setNotifications] = useState([]);
 
-  const token =
-    localStorage.getItem("token");
+  const token = localStorage.getItem("token");
+  const user = JSON.parse(localStorage.getItem("user"));
 
-  const user = JSON.parse(
-    localStorage.getItem("user")
-  );
+  // =========================
+  // SHOW NOTIFICATION BANNER
+  // =========================
+  const showNotification = (message, color = "#4f46e5") => {
+    const id = Date.now();
+    setNotifications((prev) => [...prev, { id, message, color }]);
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+      setNotifications((prev) => prev.filter((n) => n.id !== id));
+    }, 5000);
+  };
 
-  // -----------------------------
+  // =========================
   // FETCH GROUPS
-  // -----------------------------
+  // =========================
   const fetchGroups = async () => {
     try {
-      const res = await fetch(
-        "http://localhost:5000/api/groups"
-      );
-
-      const data =
-        await res.json();
-
+      const res = await fetch("http://localhost:5000/api/groups");
+      const data = await res.json();
       setGroups(data);
-
-      // AUTO SELECT FIRST GROUP
-      if (
-        !selectedGroup &&
-        data.length > 0
-      ) {
-        setSelectedGroup(data[0]);
-      }
     } catch (err) {
       console.log(err);
     }
   };
 
+  // =========================
+  // FETCH USERS
+  // =========================
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch("http://localhost:5000/api/users");
+      const data = await res.json();
+      setUsers(data.filter((u) => u._id !== user._id));
+    } catch (err) {
+      console.log(err);
+    }
+  };
+
+  // =========================
+  // INITIAL LOAD
+  // =========================
   useEffect(() => {
     if (token) {
       fetchGroups();
+      fetchUsers();
     }
   }, [token]);
 
-  // -----------------------------
-  // SIDEBAR BUTTON STYLE
-  // -----------------------------
-  const sidebarButtonStyle = (
-    active
-  ) => ({
-    width: "52px",
-    height: "52px",
-    borderRadius: "16px",
-    border: "none",
-    cursor: "pointer",
-    fontSize: "22px",
+  // =========================
+  // SOCKET
+  // =========================
+  useEffect(() => {
+    if (!user?._id) return;
 
-    background: active
-      ? "#4f46e5"
-      : "transparent",
+    socket.emit("userOnline", user._id);
 
-    color: "white",
+    socket.on("onlineUsers", (users) => {
+      setOnlineUsers(users);
+    });
 
-    transition: "0.2s",
-  });
+    socket.on("refresh_groups", () => {
+      fetchGroups();
+    });
 
-  // -----------------------------
-  // LOGIN
-  // -----------------------------
+    socket.on("receive_message", (msg) => {
+      if (selectedGroup?._id !== msg.groupId) {
+        setUnreadCounts((prev) => ({
+          ...prev,
+          [msg.groupId]: (prev[msg.groupId] || 0) + 1,
+        }));
+      }
+    });
+
+    // =========================
+    // EMPLOYEE NOTIFICATION
+    // =========================
+    socket.on("employee-notification", (data) => {
+      if (data.employeeId === user._id) {
+        showNotification(`🔔 ${data.message}`, "#4f46e5");
+      }
+    });
+
+    // =========================
+    // HR ALERT
+    // =========================
+    socket.on("hr-alert", (data) => {
+      if (user.role === "hr" || user.role === "admin") {
+        showNotification(`⚠️ ${data.message}`, "#ef4444");
+      }
+    });
+
+    return () => {
+      socket.off("onlineUsers");
+      socket.off("refresh_groups");
+      socket.off("receive_message");
+      socket.off("employee-notification");
+      socket.off("hr-alert");
+    };
+  }, [user, selectedGroup]);
+
+  // =========================
+  // OPEN GROUP
+  // =========================
+  const openGroup = (group) => {
+    setSelectedGroup(group);
+    setSelectedUser(null);
+    setUnreadCounts((prev) => ({ ...prev, [group._id]: 0 }));
+  };
+
   if (!token) {
     return <Login />;
   }
 
-  // -----------------------------
-  // UI
-  // -----------------------------
+  // =========================
+  // SEARCH FILTER
+  // =========================
+  let filteredGroups = groups.filter((g) =>
+    g.name?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  let filteredUsers = users.filter((u) =>
+    (u.name || `${u.firstName || ""} ${u.lastName || ""}`)
+      .toLowerCase()
+      .includes(search.toLowerCase())
+  );
+
+  if (activeTab === "groups") filteredUsers = [];
+  if (activeTab === "dms") filteredGroups = [];
+  if (activeTab === "unread") {
+    filteredGroups = filteredGroups.filter((g) => unreadCounts[g._id] > 0);
+    filteredUsers = [];
+  }
+
   return (
     <div
       style={{
         display: "flex",
         height: "100vh",
-        overflow: "hidden",
         background: "#f3f4f6",
-        fontFamily:
-          "Segoe UI, sans-serif",
+        overflow: "hidden",
+        fontFamily: "Segoe UI, sans-serif",
       }}
     >
-      {/* LEFT NAVIGATION */}
+      {/* =========================
+          NOTIFICATION BANNERS
+      ========================= */}
       <div
         style={{
-          width: "80px",
+          position: "fixed",
+          top: "20px",
+          right: "20px",
+          zIndex: 9999,
+          display: "flex",
+          flexDirection: "column",
+          gap: "10px",
+        }}
+      >
+        {notifications.map((n) => (
+          <div
+            key={n.id}
+            style={{
+              background: n.color,
+              color: "white",
+              padding: "14px 20px",
+              borderRadius: "12px",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
+              fontSize: "14px",
+              fontWeight: "600",
+              maxWidth: "360px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "12px",
+              animation: "slideIn 0.3s ease",
+            }}
+          >
+            <span>{n.message}</span>
+            <button
+              onClick={() =>
+                setNotifications((prev) => prev.filter((x) => x.id !== n.id))
+              }
+              style={{
+                background: "rgba(255,255,255,0.3)",
+                border: "none",
+                borderRadius: "6px",
+                color: "white",
+                cursor: "pointer",
+                padding: "2px 8px",
+                fontWeight: "bold",
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* =========================
+          SIDEBAR
+      ========================= */}
+      <div
+        style={{
+          width: "75px",
           background: "#1f2937",
           color: "white",
           display: "flex",
@@ -109,274 +243,259 @@ function App() {
           paddingTop: "20px",
         }}
       >
-        {/* LOGO */}
         <div
           style={{
-            width: "52px",
-            height: "52px",
+            width: "50px",
+            height: "50px",
             borderRadius: "14px",
             background: "#4f46e5",
             display: "flex",
-            justifyContent:
-              "center",
+            justifyContent: "center",
             alignItems: "center",
             fontWeight: "bold",
-            fontSize: "20px",
+            fontSize: "18px",
             marginBottom: "35px",
           }}
         >
           IC
         </div>
 
-        {/* MENU */}
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "20px",
-            fontSize: "22px",
-            width: "100%",
-            alignItems: "center",
-          }}
-        >
-          {/* CHATS */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
           <button
-            onClick={() =>
-              alert("Chats Module")
-            }
-            style={sidebarButtonStyle(
-              true
-            )}
-            title="Chats"
+            onClick={() => setSidebarTab("chat")}
+            style={iconStyle(sidebarTab === "chat")}
           >
             💬
           </button>
 
-          {/* TEAMS */}
           <button
-            onClick={() =>
-              alert(
-                "Teams Module Coming Soon"
-              )
-            }
-            style={{
-              ...sidebarButtonStyle(
-                false
-              ),
-              opacity: 0.7,
-            }}
-            title="Teams"
-          >
-            👥
-          </button>
-
-          {/* CALENDAR */}
-          <button
-            onClick={() =>
-              alert(
-                "Calendar Module Coming Soon"
-              )
-            }
-            style={{
-              ...sidebarButtonStyle(
-                false
-              ),
-              opacity: 0.7,
-            }}
-            title="Calendar"
+            onClick={() => setSidebarTab("calendar")}
+            style={iconStyle(sidebarTab === "calendar")}
           >
             📅
           </button>
 
-          {/* NOTIFICATIONS */}
           <button
-            onClick={() =>
-              alert(
-                "Notifications Module Coming Soon"
-              )
-            }
-            style={{
-              ...sidebarButtonStyle(
-                false
-              ),
-              opacity: 0.7,
-            }}
-            title="Notifications"
+            onClick={() => setSidebarTab("leave")}
+            style={iconStyle(sidebarTab === "leave")}
           >
-            🔔
+            🏖️
           </button>
 
-          {/* SETTINGS */}
-          <button
-            onClick={() =>
-              alert(
-                "Settings Module Coming Soon"
-              )
-            }
-            style={{
-              ...sidebarButtonStyle(
-                false
-              ),
-              opacity: 0.7,
-            }}
-            title="Settings"
-          >
-            ⚙️
-          </button>
+          {(user.role === "hr" || user.role === "admin") && (
+            <button
+              onClick={() => setSidebarTab("hr")}
+              style={iconStyle(sidebarTab === "hr")}
+            >
+              🧑‍💼
+            </button>
+          )}
         </div>
 
-        {/* PROFILE */}
-        <div
-          style={{
-            marginTop: "auto",
-            marginBottom: "20px",
-          }}
-        >
+        <div style={{ marginTop: "auto", marginBottom: "20px" }}>
           <div
             style={{
-              width: "45px",
-              height: "45px",
+              width: "42px",
+              height: "42px",
               borderRadius: "50%",
               background: "#6366f1",
               display: "flex",
-              justifyContent:
-                "center",
+              justifyContent: "center",
               alignItems: "center",
               fontWeight: "bold",
-              fontSize: "18px",
             }}
           >
-            {user?.name
-              ?.charAt(0)
-              ?.toUpperCase() || "U"}
+            {(user?.firstName || user?.name)?.charAt(0)?.toUpperCase()}
           </div>
         </div>
       </div>
 
-      {/* GROUP PANEL */}
-      <Groups
-        groups={groups}
-        selectedGroup={selectedGroup}
-        setSelectedGroup={
-          setSelectedGroup
-        }
-      />
+      {/* CALENDAR */}
+      {sidebarTab === "calendar" && (
+        <div style={{ flex: 1 }}>
+          <CalendarPage />
+        </div>
+      )}
 
-      {/* CHAT AREA */}
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          background:
-            "linear-gradient(to bottom, #eef2ff, #f8fafc)",
-        }}
-      >
-        {/* TOP HEADER */}
-        <div
-          style={{
-            height: "72px",
-            background: "white",
-            borderBottom:
-              "1px solid #ddd",
-            display: "flex",
-            justifyContent:
-              "space-between",
-            alignItems: "center",
-            padding: "0 25px",
-          }}
-        >
-          {/* LEFT */}
-          <div>
-            <h2
-              style={{
-                margin: 0,
-                fontSize: "22px",
-              }}
-            >
-              {selectedGroup?.name ||
-                "Select Group"}
-            </h2>
+      {/* LEAVE */}
+      {sidebarTab === "leave" && (
+        <div style={{ flex: 1 }}>
+          <LeaveRequest user={user} />
+        </div>
+      )}
 
-            <div
-              style={{
-                fontSize: "13px",
-                color: "#6b7280",
-                marginTop: "3px",
-              }}
-            >
-              Internal Collaboration
-              Platform
-            </div>
-          </div>
+      {/* HR */}
+      {sidebarTab === "hr" && (
+        <div style={{ flex: 1 }}>
+          <HRPanel />
+        </div>
+      )}
 
-          {/* RIGHT */}
+      {/* CHAT */}
+      {sidebarTab === "chat" && (
+        <>
+          {/* LEFT PANEL */}
           <div
             style={{
+              width: "360px",
+              background: "white",
+              borderRight: "1px solid #ddd",
               display: "flex",
-              alignItems: "center",
-              gap: "15px",
+              flexDirection: "column",
             }}
           >
-            {/* ONLINE */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                color: "#16a34a",
-                fontWeight: "500",
-              }}
-            >
-              <div
+            <div style={{ padding: "20px", fontSize: "24px", fontWeight: "700" }}>
+              Chats
+            </div>
+
+            <div style={{ display: "flex", gap: "10px", padding: "0 15px 15px" }}>
+              <TabButton
+                text="All"
+                active={activeTab === "all"}
+                onClick={() => setActiveTab("all")}
+              />
+              <TabButton
+                text="Groups"
+                active={activeTab === "groups"}
+                onClick={() => setActiveTab("groups")}
+              />
+              <TabButton
+                text="DMs"
+                active={activeTab === "dms"}
+                onClick={() => setActiveTab("dms")}
+              />
+            </div>
+
+            <div style={{ padding: "0 15px 15px" }}>
+              <input
+                placeholder="Search chats..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
                 style={{
-                  width: "10px",
-                  height: "10px",
-                  borderRadius: "50%",
-                  background:
-                    "#16a34a",
+                  width: "100%",
+                  padding: "12px",
+                  borderRadius: "10px",
+                  border: "1px solid #ddd",
                 }}
               />
-
-              Online
             </div>
 
-            {/* USER */}
-            <div
-              style={{
-                background: "#4f46e5",
-                color: "white",
-                padding:
-                  "8px 14px",
-                borderRadius:
-                  "999px",
-                fontSize: "14px",
-                fontWeight: "500",
-              }}
-            >
-              {user?.name}
+            <div style={{ flex: 1, overflowY: "auto" }}>
+              {filteredGroups.map((group) => (
+                <div
+                  key={group._id}
+                  onClick={() => openGroup(group)}
+                  style={{
+                    padding: "15px",
+                    cursor: "pointer",
+                    borderBottom: "1px solid #eee",
+                    background:
+                      selectedGroup?._id === group._id ? "#eef2ff" : "white",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <span>{group.name}</span>
+                  {unreadCounts[group._id] > 0 && (
+                    <span
+                      style={{
+                        background: "#4f46e5",
+                        color: "white",
+                        borderRadius: "999px",
+                        padding: "2px 8px",
+                        fontSize: "12px",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      {unreadCounts[group._id]}
+                    </span>
+                  )}
+                </div>
+              ))}
+
+              {filteredUsers.map((u) => (
+                <div
+                  key={u._id}
+                  onClick={() => {
+                    setSelectedUser(u);
+                    setSelectedGroup(null);
+                  }}
+                  style={{
+                    padding: "15px",
+                    cursor: "pointer",
+                    borderBottom: "1px solid #eee",
+                    background:
+                      selectedUser?._id === u._id ? "#eef2ff" : "white",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                  }}
+                >
+                  {/* ONLINE DOT */}
+                  <div
+                    style={{
+                      width: "10px",
+                      height: "10px",
+                      borderRadius: "50%",
+                      background: onlineUsers.includes(u._id)
+                        ? "#22c55e"
+                        : "#d1d5db",
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span>{u.name || `${u.firstName} ${u.lastName}`}</span>
+                </div>
+              ))}
             </div>
           </div>
-        </div>
 
-        {/* CHAT */}
-        <div style={{ flex: 1 }}>
-          <Chat
-            key={selectedGroup?._id}
-            groupId={
-              selectedGroup?._id
-            }
-            userId={user?._id}
-          />
-        </div>
-      </div>
-
-      {/* ADMIN */}
-      {user?.role === "admin" && (
-        <Admin />
+          {/* RIGHT PANEL */}
+          <div style={{ flex: 1 }}>
+            {selectedUser ? (
+              <DirectChat currentUser={user} selectedUser={selectedUser} />
+            ) : (
+              <Chat
+                key={selectedGroup?._id}
+                groupId={selectedGroup?._id}
+                userId={user?._id}
+              />
+            )}
+          </div>
+        </>
       )}
+
+      {user?.role === "admin" && <Admin />}
     </div>
   );
 }
+
+const iconStyle = (active) => ({
+  width: "50px",
+  height: "50px",
+  borderRadius: "14px",
+  border: "none",
+  cursor: "pointer",
+  fontSize: "22px",
+  background: active ? "#4f46e5" : "transparent",
+  color: "white",
+});
+
+const TabButton = ({ text, active, onClick }) => (
+  <button
+    onClick={onClick}
+    style={{
+      padding: "8px 16px",
+      borderRadius: "999px",
+      border: "none",
+      cursor: "pointer",
+      background: active ? "#4f46e5" : "#eef2ff",
+      color: active ? "white" : "#374151",
+      fontWeight: "600",
+    }}
+  >
+    {text}
+  </button>
+);
 
 export default App;
